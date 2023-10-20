@@ -1,4 +1,13 @@
 #include "systemcalls.h"
+#include <errno.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+
 
 /**
  * @param cmd the command to execute with system()
@@ -9,13 +18,23 @@
 */
 bool do_system(const char *cmd)
 {
+    int res = system(cmd);
 
-/*
- * TODO  add your code here
- *  Call the system() function with the command set in the cmd
- *   and return a boolean true if the system() call completed with success
- *   or false() if it returned a failure
-*/
+    if (res == -1) {
+        fprintf(stderr, "Failed to execute command %s: %s\n", cmd, strerror(errno));
+        return false;
+    }
+
+    if (WIFEXITED(res)) {
+        int exit_status = WEXITSTATUS(res);
+        if (exit_status != 0) {
+            fprintf(stderr, "Command %s failed with exit status %d\n", cmd, exit_status);
+            return false;
+        }
+    } else {
+        fprintf(stderr, "Command %s failed to execute\n", cmd);
+        return false;
+    }
 
     return true;
 }
@@ -45,9 +64,12 @@ bool do_exec(int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
+    va_end(args);
+
+    if (command[0][0] != '/') {
+        fprintf(stderr, "Command %s is not an absolute path\n", command[0]);
+        return false;
+    }
 
 /*
  * TODO:
@@ -59,7 +81,23 @@ bool do_exec(int count, ...)
  *
 */
 
-    va_end(args);
+    int pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
+        return false;
+    } else if (pid == 0) {
+        execv(command[0], command);
+
+        // execv should not return if successful
+        fprintf(stderr, "Failed to execute command %s: %s\n", command[0], strerror(errno));
+        exit(EXIT_FAILURE);
+    } else {
+        int res = wait(NULL);
+        if (res == -1) {
+            fprintf(stderr, "Failed to wait for child process: %s\n", strerror(errno));
+            return false;
+        }
+    }
 
     return true;
 }
@@ -80,10 +118,17 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         command[i] = va_arg(args, char *);
     }
     command[count] = NULL;
-    // this line is to avoid a compile warning before your implementation is complete
-    // and may be removed
-    command[count] = command[count];
+    va_end(args);
 
+    if (command[0][0] != '/') {
+        fprintf(stderr, "Command %s is not an absolute path\n", command[0]);
+        return false;
+    }
+
+    if (outputfile[0] != '/') {
+        fprintf(stderr, "Output file %s is not an absolute path\n", outputfile);
+        return false;
+    }
 
 /*
  * TODO
@@ -92,8 +137,36 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
  *   The rest of the behaviour is same as do_exec()
  *
 */
+    int fd = open(outputfile, O_WRONLY|O_TRUNC|O_CREAT, 0644);
+    if (fd < 0) {
+        fprintf(stderr, "Failed to open file %s: %s\n", outputfile, strerror(errno));
+        return false;
+    }
 
-    va_end(args);
+    int pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
+        return false;
+    } else if (pid == 0) {
+        if (dup2(fd, 1) < 0) {
+            fprintf(stderr, "Failed to redirect stdout to file %s: %s\n", outputfile, strerror(errno));
+            return false;
+        }
+
+        close(fd);
+        execv(command[0], command);
+
+        // execv should not return if successful
+        fprintf(stderr, "Failed to execute command %s: %s\n", command[0], strerror(errno));
+        exit(EXIT_FAILURE);
+    } else {
+        close(fd);
+        int res = wait(NULL);
+        if (res == -1) {
+            fprintf(stderr, "Failed to wait for child process: %s\n", strerror(errno));
+            return false;
+        }
+    }
 
     return true;
 }
