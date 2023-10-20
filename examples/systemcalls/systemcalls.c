@@ -92,9 +92,13 @@ bool do_exec(int count, ...)
         fprintf(stderr, "Failed to execute command %s: %s\n", command[0], strerror(errno));
         exit(EXIT_FAILURE);
     } else {
-        int res = wait(NULL);
-        if (res == -1) {
+        int status;
+        if (wait(&status) == -1) {
             fprintf(stderr, "Failed to wait for child process: %s\n", strerror(errno));
+            return false;
+        }
+        if (status != 0) {
+            fprintf(stderr, "Command %s failed with exit status %d\n", command[0], status);
             return false;
         }
     }
@@ -125,11 +129,6 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         return false;
     }
 
-    if (outputfile[0] != '/') {
-        fprintf(stderr, "Output file %s is not an absolute path\n", outputfile);
-        return false;
-    }
-
 /*
  * TODO
  *   Call execv, but first using https://stackoverflow.com/a/13784315/1446624 as a refernce,
@@ -146,6 +145,7 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
     int pid = fork();
     if (pid < 0) {
         fprintf(stderr, "Failed to fork: %s\n", strerror(errno));
+        close(fd);
         return false;
     } else if (pid == 0) {
         if (dup2(fd, 1) < 0) {
@@ -161,9 +161,13 @@ bool do_exec_redirect(const char *outputfile, int count, ...)
         exit(EXIT_FAILURE);
     } else {
         close(fd);
-        int res = wait(NULL);
-        if (res == -1) {
+        int status;
+        if (wait(&status) == -1) {
             fprintf(stderr, "Failed to wait for child process: %s\n", strerror(errno));
+            return false;
+        }
+        if (status != 0) {
+            fprintf(stderr, "Command %s failed with exit status %d\n", command[0], status);
             return false;
         }
     }
